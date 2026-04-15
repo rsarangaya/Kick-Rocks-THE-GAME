@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Pound Sand</title>
+<style>
+  :root{
+    --bg:#eef5fb;
+    --panel:#d8ecff;
+    --sky1:#d8ecff;
+    --sky2:#eef6fc;
+    --sand1:#d9c089;
+    --sand2:#c8aa6d;
+    --sand3:#b59251;
+    --blue1:#2563eb;
+    --blue2:#1d4ed8;
+    --dark:#1f2937;
+  }
+
+  * { box-sizing:border-box; }
+
+  body{
+    margin:0;
+    background:var(--bg);
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    min-height:100vh;
+    font-family:Arial, Helvetica, sans-serif;
+  }
+
+  .wrap{
+    position:relative;
+  }
+
+  canvas{
+    background:linear-gradient(180deg,var(--sky1) 0%,var(--sky2) 60%,#d4deb8 60%,#c2ce98 100%);
+    border-radius:12px;
+    border:4px solid #2f3b46;
+    box-shadow:0 10px 30px rgba(0,0,0,.2);
+    display:block;
+  }
+
+  .ui-top{
+    position:absolute;
+    top:16px;
+    left:50%;
+    transform:translateX(-50%);
+    display:flex;
+    gap:14px;
+    align-items:center;
+  }
+
+  button{
+    padding:12px 22px;
+    min-width:120px;
+    height:46px;
+    border:none;
+    border-radius:10px;
+    background:linear-gradient(180deg,var(--blue1),var(--blue2));
+    color:white;
+    font-weight:bold;
+    cursor:pointer;
+    box-shadow:0 8px 18px rgba(0,0,0,.16);
+  }
+
+  .power-wrap{
+    position:absolute;
+    top:74px;
+    left:50%;
+    transform:translateX(-50%);
+    width:260px;
+    height:16px;
+    border-radius:999px;
+    background:rgba(0,0,0,0.14);
+    overflow:hidden;
+    box-shadow:inset 0 1px 3px rgba(0,0,0,0.18);
+  }
+
+  .power-fill{
+    width:0%;
+    height:100%;
+    border-radius:999px;
+    background:linear-gradient(90deg,#60a5fa,#2563eb);
+    transition:width 0.04s linear;
+  }
+
+  .game-menu{
+    position:absolute;
+    top:16px;
+    left:16px;
+    z-index:10;
+    user-select:none;
+  }
+
+  .game-menu-trigger{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    padding:12px 22px;
+    min-width:120px;
+    height:46px;
+    color:#000;
+    font-weight:bold;
+  }
+
+  .game-menu-dropdown{
+    position:absolute;
+    top:42px;
+    left:0;
+    display:none;
+    min-width:150px;
+    padding:6px;
+    border-radius:10px;
+    background:rgba(255,255,255,0.96);
+    box-shadow:0 10px 24px rgba(0,0,0,.18);
+    border:1px solid rgba(0,0,0,.08);
+  }
+
+  .game-menu:hover .game-menu-dropdown{ display:block; }
+
+  .game-menu-item{
+    display:block;
+    width:100%;
+    padding:10px 12px;
+    border-radius:8px;
+    color:#1f2937;
+    text-decoration:none;
+    font-weight:bold;
+    cursor:pointer;
+  }
+
+  .game-menu-item:hover{ background:#eef5fb; }
+
+  .ui-bottom-right{
+    position:fixed;
+    right:12px;
+    bottom:12px;
+  }
+
+  .upload-label{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    padding:8px 12px;
+    min-width:120px;
+    height:34px;
+    font-size:0.85rem;
+    border-radius:10px;
+    background:#1f2937;
+    color:white;
+    cursor:pointer;
+    font-weight:bold;
+    box-shadow:0 8px 18px rgba(0,0,0,.16);
+  }
+
+  .hint{
+    position:absolute;
+    bottom:10px;
+    left:16px;
+    color:#0f172a;
+    font-size:13px;
+    opacity:.75;
+    font-weight:bold;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="game-menu">
+    <div class="game-menu-trigger">change game</div>
+    <div class="game-menu-dropdown">
+      <a class="game-menu-item" href="KickRocksTheGame.html">kick rocks</a>
+      <a class="game-menu-item" href="#" onclick="alert('Next up: Take a Hike'); return false;">take a hike</a>
+    </div>
+  </div>
+
+  <div class="ui-top">
+    <button id="stompBtn">Punch</button>
+    <button id="removeTargetBtn" style="background:#7f1d1d; display:none;">Remove Target</button>
+      </div>
+  <div class="power-wrap"><div id="powerFill" class="power-fill"></div></div>
+
+  <canvas id="game" width="980" height="560"></canvas>
+  <div class="hint">Hold Punch to charge power, then release to punch the sand.</div>
+
+  <div class="ui-bottom-right">
+    <label class="upload-label">add target<input id="soleUpload" type="file" accept="image/*" style="display:none"></label>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+const stompBtn = document.getElementById("stompBtn");
+const removeTargetBtn = document.getElementById("removeTargetBtn");
+const powerFill = document.getElementById("powerFill");
+const soleUpload = document.getElementById("soleUpload");
+
+let targetSprite = null;
+let targetSpriteReady = false;
+  removeTargetBtn.style.display = 'none';
+const target = {
+  x: 490,
+  y: 432,
+  width: 90,
+  height: 90,
+  visible: false
+};
+let charging = false;
+let charge = 0;
+
+const sandTop = 402;
+const leftWall = 24;
+const rightWall = canvas.width - 24;
+
+const state = {
+  stomp: {
+    x: 490,
+    y: 90,
+    width: 132,
+    height: 58,
+    vy: 0,
+    phase: "idle",
+    active: false,
+    power: 0
+  },
+  soleAngle: 0.02,
+  dust: [],
+  pebbles: [],
+  ripples: [],
+  shake: 0
+};
+
+function resetGame(){
+  state.stomp.x = 490;
+  state.stomp.y = 90;
+  state.stomp.vy = 0;
+  state.stomp.phase = "idle";
+  state.stomp.active = false;
+  state.stomp.power = 0;
+  state.dust = [];
+  state.pebbles = [];
+  state.ripples = [];
+  state.shake = 0;
+  charging = false;
+  charge = 0;
+  powerFill.style.width = "0%";
+}
+
+removeTargetBtn.addEventListener("click", () => {
+  target.visible = false;
+  targetSprite = null;
+  targetSpriteReady = false;
+  removeTargetBtn.style.display = 'none';
+});
+
+soleUpload.addEventListener("change", (e) => {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      targetSprite = img;
+      targetSpriteReady = true;
+      target.visible = true;
+      removeTargetBtn.style.display = 'inline-flex';
+    };
+    img.src = reader.result;
+  };
+  reader.readAsDataURL(file);
+});
+
+function beginCharge(){
+  if (state.stomp.active) return;
+  charging = true;
+  charge = 0;
+}
+
+function releaseStomp(){
+  if (!charging || state.stomp.active) return;
+  charging = false;
+  state.stomp.active = true;
+  state.stomp.phase = "drop";
+  state.stomp.power = 0.35 + charge * 1.4;
+  state.stomp.vy = 7 + charge * 18;
+  charge = 0;
+  powerFill.style.width = "0%";
+}
+
+stompBtn.addEventListener("mousedown", beginCharge);
+stompBtn.addEventListener("mouseup", releaseStomp);
+stompBtn.addEventListener("mouseleave", () => {
+  if (charging) releaseStomp();
+});
+
+stompBtn.addEventListener("touchstart", (e) => {
+  e.preventDefault();
+  beginCharge();
+}, { passive:false });
+
+stompBtn.addEventListener("touchend", (e) => {
+  e.preventDefault();
+  releaseStomp();
+}, { passive:false });
+
+
+function spawnImpact(power){
+  const centerX = state.stomp.x;
+  const impactY = sandTop + 6;
+
+  const dustCount = Math.floor(18 + power * 26);
+  const pebbleCount = Math.floor(8 + power * 14);
+
+  for(let i = 0; i < dustCount; i++){
+    const dir = Math.random() < 0.5 ? -1 : 1;
+    state.dust.push({
+      x: centerX + (Math.random() * 24 - 12),
+      y: impactY + Math.random() * 4,
+      vx: dir * (Math.random() * (2.2 + power * 3.8)),
+      vy: -(Math.random() * (2.0 + power * 3.4)),
+      life: 1,
+      size: Math.random() * (6 + power * 3) + 4
+    });
+  }
+
+  for(let i = 0; i < pebbleCount; i++){
+    const dir = Math.random() < 0.5 ? -1 : 1;
+    state.pebbles.push({
+      x: centerX + (Math.random() * 18 - 9),
+      y: impactY + Math.random() * 3,
+      vx: dir * (Math.random() * (3.6 + power * 5.5)),
+      vy: -(Math.random() * (3.5 + power * 4.5) + 1),
+      r: Math.random() * 4 + 2,
+      rot: Math.random() * Math.PI * 2,
+      vr: (Math.random() - 0.5) * 0.3,
+      life: 1
+    });
+  }
+
+  state.ripples.push({
+    x: centerX,
+    y: impactY + 8,
+    radius: 10,
+    alpha: 0.45,
+    grow: 2.2 + power * 1.6
+  });
+
+  state.shake = 8 + power * 12;
+}
+
+function updateStomp(){
+  const s = state.stomp;
+  const fistHalfHeight = 40;
+  const startY = 90;
+  const contactY = sandTop - fistHalfHeight - 2;
+
+  if (s.phase === "drop"){
+    s.y += s.vy;
+    s.vy += 0.9;
+
+    if (s.y >= contactY){
+      s.y = contactY;
+      s.vy = 0;
+      spawnImpact(s.power);
+      s.phase = "retract";
+    }
+  } else if (s.phase === "retract"){
+    // Clean retract animation upward from the contact point.
+    s.vy -= 0.42;
+    s.vy *= 0.94;
+    s.y += s.vy;
+
+    // Never allow the fist to pass back down through the sand during retract.
+    if (s.y > contactY){
+      s.y = contactY;
+      if (s.vy > 0) s.vy = 0;
+    }
+
+    // Once back at the starting position, auto-reset to idle.
+    if (s.y <= startY){
+      s.y = startY;
+      s.vy = 0;
+      s.phase = "idle";
+      s.active = false;
+      s.power = 0;
+    }
+  }
+}
+
+function updateDust(){
+  for(let i = state.dust.length - 1; i >= 0; i--){
+    const p = state.dust[i];
+    p.vy += 0.12;
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vx *= 0.985;
+    p.life *= 0.966;
+    p.size *= 0.996;
+    if (p.y > sandTop + 26) p.y = sandTop + 26;
+    if (p.life < 0.05) state.dust.splice(i, 1);
+  }
+}
+
+function updatePebbles(){
+  for(let i = state.pebbles.length - 1; i >= 0; i--){
+    const p = state.pebbles[i];
+    p.vy += 0.22;
+    p.x += p.vx;
+    p.y += p.vy;
+    p.rot += p.vr;
+    p.vx *= 0.992;
+    p.life *= 0.995;
+
+    if (p.x < leftWall + p.r){
+      p.x = leftWall + p.r;
+      p.vx *= -0.55;
+    } else if (p.x > rightWall - p.r){
+      p.x = rightWall - p.r;
+      p.vx *= -0.55;
+    }
+
+    if (p.y > sandTop + 18){
+      p.y = sandTop + 18;
+      p.vy *= -0.28;
+      p.vx *= 0.78;
+      if (Math.abs(p.vy) < 0.12) p.vy = 0;
+    }
+
+    if (p.life < 0.12 || (Math.abs(p.vx) < 0.04 && Math.abs(p.vy) < 0.04 && p.y >= sandTop + 18)){
+      state.pebbles.splice(i, 1);
+    }
+  }
+}
+
+function updateRipples(){
+  for(let i = state.ripples.length - 1; i >= 0; i--){
+    const r = state.ripples[i];
+    r.radius += r.grow;
+    r.alpha *= 0.955;
+    if (r.alpha < 0.03) state.ripples.splice(i, 1);
+  }
+}
+
+function drawBackground(){
+  const sx = (Math.random() - 0.5) * state.shake;
+  const sy = (Math.random() - 0.5) * state.shake;
+  ctx.save();
+  ctx.translate(sx, sy);
+
+  ctx.fillStyle = "rgba(92,136,88,0.16)";
+  ctx.beginPath();
+  ctx.moveTo(0, 330);
+  ctx.quadraticCurveTo(180, 280, 360, 320);
+  ctx.quadraticCurveTo(540, 290, 740, 330);
+  ctx.quadraticCurveTo(880, 300, 980, 336);
+  ctx.lineTo(980, 560);
+  ctx.lineTo(0, 560);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.fillStyle = "#c5b07a";
+  ctx.fillRect(0, sandTop - 6, canvas.width, 26);
+
+  const sandGrad = ctx.createLinearGradient(0, sandTop, 0, canvas.height);
+  sandGrad.addColorStop(0, "#dcc38b");
+  sandGrad.addColorStop(0.55, "#c8aa6d");
+  sandGrad.addColorStop(1, "#b59050");
+  ctx.fillStyle = sandGrad;
+  ctx.fillRect(0, sandTop + 20, canvas.width, canvas.height - sandTop);
+
+  // little sand texture
+  ctx.fillStyle = "rgba(120,90,40,0.08)";
+  for(let i = 0; i < 34; i++){
+    ctx.beginPath();
+    ctx.ellipse(25 + i * 28, sandTop + 36 + Math.sin(i * 0.9) * 5, 8, 2.4, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.restore();
+}
+
+function drawRipples(){
+  for(const r of state.ripples){
+    ctx.save();
+    ctx.strokeStyle = `rgba(140,110,60,${r.alpha})`;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.ellipse(r.x, r.y, r.radius * 1.55, r.radius * 0.42, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+function drawDust(){
+  for(const p of state.dust){
+    ctx.save();
+    ctx.globalAlpha = p.life * 0.42;
+    ctx.fillStyle = "#9e7c45";
+    ctx.beginPath();
+    ctx.ellipse(p.x, p.y, p.size, p.size * 0.65, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+function drawPebbles(){
+  for(const p of state.pebbles){
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.rotate(p.rot);
+
+    const g = ctx.createRadialGradient(-1,-1,1,0,0,p.r + 2);
+    g.addColorStop(0, "#8f8a82");
+    g.addColorStop(0.6, "#66615b");
+    g.addColorStop(1, "#4a4540");
+    ctx.fillStyle = g;
+
+    ctx.beginPath();
+    ctx.moveTo(-p.r * 1.0, -p.r * 0.15);
+    ctx.quadraticCurveTo(-p.r * 0.7, -p.r * 0.9, p.r * 0.15, -p.r * 0.75);
+    ctx.quadraticCurveTo(p.r * 0.95, -p.r * 0.45, p.r * 0.9, p.r * 0.35);
+    ctx.quadraticCurveTo(p.r * 0.2, p.r * 0.95, -p.r * 0.8, p.r * 0.45);
+    ctx.quadraticCurveTo(-p.r * 1.05, p.r * 0.05, -p.r * 1.0, -p.r * 0.15);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+
+function drawTarget(){
+  if (!target.visible) return;
+
+  ctx.save();
+  ctx.globalAlpha = 0.18;
+  ctx.fillStyle = "#000";
+  ctx.beginPath();
+  ctx.ellipse(target.x + 4, sandTop + 20, target.width * 0.42, 10, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  if (targetSpriteReady && targetSprite){
+    ctx.drawImage(targetSprite, target.x - target.width/2, target.y - target.height/2, target.width, target.height);
+  } else {
+    ctx.save();
+    ctx.translate(target.x, target.y);
+    ctx.fillStyle = "#ef4444";
+    ctx.beginPath();
+    ctx.arc(0, 0, 34, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#fff";
+    ctx.beginPath();
+    ctx.arc(0, 0, 22, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#ef4444";
+    ctx.beginPath();
+    ctx.arc(0, 0, 10, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+function drawStomp(){
+  const s = state.stomp;
+
+  const armGrad = ctx.createLinearGradient(s.x, 30, s.x, s.y + 20);
+  armGrad.addColorStop(0, "#f1c7a4");
+  armGrad.addColorStop(1, "#cb8f68");
+  ctx.fillStyle = armGrad;
+  ctx.beginPath();
+  ctx.roundRect(s.x - 24, 0, 48, s.y + 10, 22);
+  ctx.fill();
+
+  ctx.fillStyle = "#2b313b";
+  ctx.beginPath();
+  ctx.roundRect(s.x - 34, s.y - 8, 68, 16, 8);
+  ctx.fill();
+
+  ctx.save();
+  ctx.globalAlpha = 0.20;
+  ctx.fillStyle = "#000";
+  const spread = 40 + (s.y - 90) * 0.10;
+  ctx.beginPath();
+  ctx.ellipse(s.x + 3, sandTop + 10, spread, 10, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  ctx.save();
+  ctx.translate(s.x, s.y);
+  ctx.rotate(state.soleAngle * 0.5);
+
+  // fist
+  const skin = ctx.createLinearGradient(-52, -22, 52, 28);
+  skin.addColorStop(0, "#f3caa7");
+  skin.addColorStop(1, "#ca8e67");
+  ctx.fillStyle = skin;
+  ctx.beginPath();
+  ctx.roundRect(-48, -28, 96, 58, 18);
+  ctx.fill();
+
+  ctx.fillStyle = "#eab993";
+  const bumps = [-30, -10, 10, 30];
+  for (const bx of bumps){
+    ctx.beginPath();
+    ctx.roundRect(bx - 10, -36, 20, 18, 8);
+    ctx.fill();
+  }
+
+  ctx.fillStyle = "#d89c74";
+  ctx.beginPath();
+  ctx.ellipse(34, 6, 18, 12, -0.6, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.strokeStyle = "rgba(120,70,40,0.25)";
+  ctx.lineWidth = 1.5;
+  for (const bx of [-20, 0, 20]){
+    ctx.beginPath();
+    ctx.moveTo(bx, -18);
+    ctx.lineTo(bx, 8);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+function updateCharge(){
+  if (charging){
+    charge += 0.016;
+    if (charge > 1) charge = 1;
+  }
+  powerFill.style.width = `${charge * 100}%`;
+}
+
+function loop(){
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  updateCharge();
+  updateStomp();
+  updateDust();
+  updatePebbles();
+  updateRipples();
+  state.shake *= 0.88;
+
+  drawBackground();
+  drawTarget();
+  drawRipples();
+  drawDust();
+  drawPebbles();
+  drawStomp();
+
+  requestAnimationFrame(loop);
+}
+
+resetGame();
+loop();
+</script>
+</body>
+</html>

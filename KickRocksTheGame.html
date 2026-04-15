@@ -20,26 +20,176 @@ canvas{
   box-shadow:0 10px 30px rgba(0,0,0,.2); border:4px solid #2f3b46;
 }
 button{
-  position:absolute;
-  top:20px;
-  padding:12px 18px;
+  padding:12px 22px;
+  min-width:120px;
+  height:46px;
   border:none;
   border-radius:10px;
   background:#2563eb;
   color:white;
   font-weight:bold;
   cursor:pointer;
+  box-shadow:0 8px 18px rgba(0,0,0,.16);
+}
+
+.power-wrap{
+  position:absolute;
+  top:76px;
+  left:50%;
+  transform:translateX(-50%);
+  width:260px;
+  height:16px;
+  border-radius:999px;
+  background:rgba(0,0,0,0.14);
+  overflow:hidden;
+  box-shadow:inset 0 1px 3px rgba(0,0,0,0.18);
+}
+
+.power-fill{
+  width:0%;
+  height:100%;
+  border-radius:999px;
+  background:linear-gradient(90deg,#60a5fa,#2563eb);
+  transition:width 0.04s linear;
+}
+
+.game-menu{
+  position:absolute;
+  top:12px;
+  left:12px;
+  z-index:20;
+  user-select:none;
+}
+
+.game-menu-trigger{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  padding:12px 22px;
+  min-width:120px;
+  height:46px;
+  color:#000;
+  font-weight:bold;
+}
+
+.game-menu-dropdown{
+  position:absolute;
+  top:42px;
+  left:0;
+  display:none;
+  min-width:150px;
+  padding:6px;
+  border-radius:10px;
+  background:rgba(255,255,255,0.96);
+  box-shadow:0 10px 24px rgba(0,0,0,.18);
+  border:1px solid rgba(0,0,0,.08);
+}
+
+.game-menu:hover .game-menu-dropdown{
+  display:block;
+}
+
+.game-menu-item{
+  display:block;
+  width:100%;
+  padding:10px 12px;
+  border-radius:8px;
+  color:#1f2937;
+  text-decoration:none;
+  font-weight:bold;
+  cursor:pointer;
+}
+
+.game-menu-item:hover{
+  background:#eef5fb;
+}
+
+.ui-top{
+  position:absolute;
+  top:20px;
+  left:50%;
+  transform:translateX(-50%);
+  display:flex;
+  gap:14px;
+  align-items:center;
+}
+
+.ui-bottom-right{
+  position:fixed;
+  right:12px;
+  bottom:12px;
+}
+
+.upload-label{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  padding:8px 12px;
+  min-width:120px;
+  height:34px;
+  font-size:0.85rem;
+  border-radius:10px;
+  background:#1f2937;
+  color:white;
+  cursor:pointer;
+  font-weight:bold;
+  box-shadow:0 8px 18px rgba(0,0,0,.16);
 }
 </style>
 </head>
 <body>
-<button onclick="start()">Kick</button>
-<button style="top:60px;background:#444" onclick="resetGame()">Reset</button>
+
+<div class="game-menu">
+  <div class="game-menu-trigger">change game</div>
+  <div class="game-menu-dropdown">
+    <a class="game-menu-item" href="PoundSand.html">pound sand</a>
+    <a class="game-menu-item" href="#" onclick="alert('Next up: Take a Hike'); return false;">take a hike</a>
+  </div>
+</div>
+
+<div class="ui-top">
+<button id="kickBtn">Kick</button>
+<button id="resetRockBtn" style="background:#7f1d1d; display:none;">Turn Back to Rock</button>
+<button style="background:#444" onclick="resetGame()">Reset</button>
+</div>
+<div class="power-wrap"><div id="powerFill" class="power-fill"></div></div>
+<div class="ui-bottom-right">
+<label class="upload-label">upload object image<input id="spriteUpload" type="file" accept="image/*" style="display:none"></label>
+</div>
 <canvas id="c" width="980" height="560"></canvas>
 
 <script>
 const ctx = c.getContext("2d");
+const resetRockBtn = document.getElementById("resetRockBtn");
+const powerFill = document.getElementById("powerFill");
+
+const kickBtn = document.getElementById("kickBtn");
+
+kickBtn.addEventListener("mousedown", () => {
+  charging = true;
+  charge = 0;
+});
+
+kickBtn.addEventListener("mouseup", () => {
+  charging = false;
+  start(charge);
+  charge = 0;
+  if (powerFill) powerFill.style.width = "0%";
+});
+
+kickBtn.addEventListener("mouseleave", () => {
+  if (charging) {
+    charging = false;
+    start(charge);
+    charge = 0;
+    if (powerFill) powerFill.style.width = "0%";
+  }
+});
+
 const groundY = 430;
+
+let charge = 0;
+let charging = false;
 
 const leg = {
   hipX: 300,
@@ -71,6 +221,12 @@ const rock = {
 };
 
 const dirtParticles = [];
+let rockSprite = null;
+let rockSpriteReady = false;
+
+function selectGame(name){
+  alert("Selected: " + name + "\n\nNext step is building that game.");
+}
 
 function resetGame(){
   rock.x = 430;
@@ -85,14 +241,43 @@ function resetGame(){
   leg.phase = "idle";
   leg.extraDrive = 0;
   leg.running = false;
+  charge = 0;
+  if (typeof powerFill !== "undefined" && powerFill) powerFill.style.width = "0%";
+  if (typeof resetRockBtn !== "undefined" && resetRockBtn && !rockSpriteReady) resetRockBtn.style.display = "none";
 }
 
-function start(){
+
+const spriteUpload = document.getElementById("spriteUpload");
+spriteUpload.addEventListener("change", (e) => {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      rockSprite = img;
+      rockSpriteReady = true;
+      resetRockBtn.style.display = 'inline-flex';
+    };
+    img.src = reader.result;
+  };
+  reader.readAsDataURL(file);
+
+resetRockBtn.addEventListener("click", () => {
+  rockSprite = null;
+  rockSpriteReady = false;
+  resetRockBtn.style.display = 'none';
+});
+});
+
+function start(power=0.005){
   if (leg.running) return;
   leg.running = true;
   leg.phase = "backswing";
   leg.extraDrive = 0;
   leg.vel = 0;
+  leg.kickPower = 0.006 + power * 0.02;
 }
 
 function clamp(v,min,max){ return Math.max(min, Math.min(max, v)); }
@@ -157,7 +342,7 @@ function updateLeg(){
       leg.angle = -1.02;
       leg.vel = 0;
       leg.phase = "kick";
-      leg.extraDrive = 0.0082;
+      leg.extraDrive = leg.kickPower || 0.0082;
     }
   } else if (leg.phase === "kick") {
     const acc = -leg.gravity * Math.sin(leg.angle);
@@ -392,10 +577,15 @@ function drawRock(){
   for (const p of rock.trail){
     ctx.save();
     ctx.globalAlpha = p.a * 0.12;
-    ctx.fillStyle = "#808080";
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, rock.r * 0.85, 0, Math.PI*2);
-    ctx.fill();
+    if (rockSpriteReady && rockSprite) {
+      const size = rock.r * 2.1 * 0.85;
+      ctx.drawImage(rockSprite, p.x - size/2, p.y - size/2, size, size);
+    } else {
+      ctx.fillStyle = "#808080";
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, rock.r * 0.85, 0, Math.PI*2);
+      ctx.fill();
+    }
     ctx.restore();
   }
 
@@ -411,32 +601,42 @@ function drawRock(){
   ctx.translate(rock.x, rock.y);
   ctx.rotate(rock.rot);
 
-  const g = ctx.createRadialGradient(-5,-5,3,0,0,rock.r+6);
-  g.addColorStop(0, "#989898");
-  g.addColorStop(0.55, "#6b6b6b");
-  g.addColorStop(1, "#474747");
-  ctx.fillStyle = g;
+  if (rockSpriteReady && rockSprite) {
+    const size = rock.r * 2.25;
+    ctx.drawImage(rockSprite, -size/2, -size/2, size, size);
+  } else {
+    const g = ctx.createRadialGradient(-5,-5,3,0,0,rock.r+6);
+    g.addColorStop(0, "#989898");
+    g.addColorStop(0.55, "#6b6b6b");
+    g.addColorStop(1, "#474747");
+    ctx.fillStyle = g;
 
-  ctx.beginPath();
-  for(let i = 0; i < rock.shape.length; i++){
-    const a = (i / rock.shape.length) * Math.PI * 2;
-    const rr = rock.r * rock.shape[i];
-    const px = Math.cos(a) * rr;
-    const py = Math.sin(a) * rr;
-    if(i === 0) ctx.moveTo(px, py);
-    else ctx.quadraticCurveTo(px*0.8, py*0.8, px, py);
+    ctx.beginPath();
+    const pts = rock.shape.length;
+    for(let i = 0; i < pts; i++){
+      const a = (i / pts) * Math.PI * 2;
+      const rr = rock.r * rock.shape[i];
+      const px = Math.cos(a) * rr;
+      const py = Math.sin(a) * rr;
+      const nextA = ((i + 1) / pts) * Math.PI * 2;
+      const nextR = rock.r * rock.shape[(i + 1) % pts];
+      const nx = Math.cos(nextA) * nextR;
+      const ny = Math.sin(nextA) * nextR;
+      if(i === 0) ctx.moveTo(px, py);
+      ctx.quadraticCurveTo(px, py, (px + nx) / 2, (py + ny) / 2);
+    }
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.strokeStyle = "rgba(40,40,40,0.35)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(-8, -3);
+    ctx.quadraticCurveTo(0, -8, 9, -2);
+    ctx.moveTo(-5, 6);
+    ctx.quadraticCurveTo(3, 10, 10, 4);
+    ctx.stroke();
   }
-  ctx.closePath();
-  ctx.fill();
-
-  ctx.strokeStyle = "rgba(40,40,40,0.35)";
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(-8, -3);
-  ctx.quadraticCurveTo(0, -8, 9, -2);
-  ctx.moveTo(-5, 6);
-  ctx.quadraticCurveTo(3, 10, 10, 4);
-  ctx.stroke();
 
   ctx.restore();
 }
@@ -510,6 +710,15 @@ function drawLeg(){
 }
 
 function loop(){
+
+  if (charging) {
+    charge += 0.009;
+    if (charge > 1) charge = 1;
+  }
+
+  if (powerFill) {
+    powerFill.style.width = `${charge * 100}%`;
+  }
   ctx.clearRect(0, 0, c.width, c.height);
 
   drawBackground();
