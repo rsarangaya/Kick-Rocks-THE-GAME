@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Realistic Leg Pendulum - Knee Fixed</title>
+<style>
+body{
+  margin:0;
+  background:#eef5fb;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  height:100vh;
+  font-family:Arial,Helvetica,sans-serif;
+}
+canvas{
+  background:linear-gradient(180deg,#d8ecff 0%,#eef6fc 62%,#c9d5ae 62%,#b4c789 100%);
+  border-radius:12px;
+  box-shadow:0 10px 30px rgba(0,0,0,.2); border:4px solid #2f3b46;
+}
+button{
+  position:absolute;
+  top:20px;
+  padding:12px 18px;
+  border:none;
+  border-radius:10px;
+  background:#2563eb;
+  color:white;
+  font-weight:bold;
+  cursor:pointer;
+}
+</style>
+</head>
+<body>
+<button onclick="start()">Kick</button>
+<button style="top:60px;background:#444" onclick="resetGame()">Reset</button>
+<canvas id="c" width="980" height="560"></canvas>
+
+<script>
+const ctx = c.getContext("2d");
+const groundY = 430;
+
+const leg = {
+  hipX: 300,
+  hipY: 165,
+  upperLen: 140,
+  lowerLen: 138,
+  footLen: 42,
+  angle: 0.0,
+  vel: 0,
+  gravity: 0.0038,
+  damping: 0.9992,
+  running: false,
+  phase: "idle",
+  extraDrive: 0,
+  thighRadius: 22,
+  calfRadius: 18,
+  hitCooldown: 0
+};
+
+const rock = {
+  x: 430,
+  y: groundY,
+  r: 18,
+  vx: 0,
+  vy: 0,
+  rot: 0,
+  trail: [],
+  shape: [1.0, 0.92, 1.05, 0.97, 1.08, 0.95, 1.02, 0.98, 1.04, 0.96]
+};
+
+const dirtParticles = [];
+
+function resetGame(){
+  rock.x = 430;
+  rock.y = groundY;
+  rock.vx = 0;
+  rock.vy = 0;
+  rock.rot = 0;
+  dirtParticles.length = 0;
+
+  leg.angle = 0.0;
+  leg.vel = 0;
+  leg.phase = "idle";
+  leg.extraDrive = 0;
+  leg.running = false;
+}
+
+function start(){
+  if (leg.running) return;
+  leg.running = true;
+  leg.phase = "backswing";
+  leg.extraDrive = 0;
+  leg.vel = 0;
+}
+
+function clamp(v,min,max){ return Math.max(min, Math.min(max, v)); }
+
+function solveKnee(hip, ankle, len1, len2, bendDir=-1){
+  const dx = ankle.x - hip.x;
+  const dy = ankle.y - hip.y;
+  const dist0 = Math.hypot(dx,dy) || 0.0001;
+  const dist = clamp(dist0, Math.abs(len1-len2)+0.001, len1+len2-0.001);
+
+  const ux = dx / dist0;
+  const uy = dy / dist0;
+
+  const a = (len1*len1 - len2*len2 + dist*dist) / (2*dist);
+  const h = Math.sqrt(Math.max(0, len1*len1 - a*a));
+
+  const px = hip.x + ux * a;
+  const py = hip.y + uy * a;
+
+  const perpX = -uy * bendDir;
+  const perpY = ux * bendDir;
+
+  return {
+    x: px + perpX * h,
+    y: py + perpY * h
+  };
+}
+
+function getAnkle(){
+  return {
+    x: leg.hipX + Math.sin(leg.angle) * (leg.upperLen + leg.lowerLen - 8),
+    y: leg.hipY + Math.cos(leg.angle) * (leg.upperLen + leg.lowerLen - 8)
+  };
+}
+
+function getPose(){
+  const hip = { x: leg.hipX, y: leg.hipY };
+  const ankle = getAnkle();
+  const knee = solveKnee(hip, ankle, leg.upperLen, leg.lowerLen, -1);
+
+  const shinAngle = Math.atan2(ankle.y - knee.y, ankle.x - knee.x);
+  const footAngle = shinAngle - Math.PI / 2;
+
+  const toe = {
+    x: ankle.x + Math.cos(footAngle) * leg.footLen,
+    y: ankle.y + Math.sin(footAngle) * leg.footLen
+  };
+
+  return { hip, knee, ankle, toe, shinAngle, footAngle };
+}
+
+function updateLeg(){
+  if(!leg.running) return;
+
+  if (leg.phase === "backswing") {
+    // Pull left from neutral before the kick
+    leg.vel -= 0.012;
+    leg.vel *= 0.92;
+    leg.angle += leg.vel;
+
+    if (leg.angle <= -1.02) {
+      leg.angle = -1.02;
+      leg.vel = 0;
+      leg.phase = "kick";
+      leg.extraDrive = 0.0082;
+    }
+  } else if (leg.phase === "kick") {
+    const acc = -leg.gravity * Math.sin(leg.angle);
+    leg.vel += acc;
+
+    if (Math.abs(leg.extraDrive) > 0.0001) {
+      leg.vel += leg.extraDrive;
+      leg.extraDrive *= 0.965;
+    }
+
+    leg.vel *= leg.damping;
+    leg.angle += leg.vel;
+
+    const maxForwardAngle = 0.55;
+    const minBackAngle = -1.25;
+
+    if (leg.angle > maxForwardAngle) {
+      leg.angle = maxForwardAngle;
+      if (leg.vel > 0) {
+        leg.vel *= -0.42;
+        leg.phase = "return";
+      }
+    }
+
+    if (leg.angle < minBackAngle) {
+      leg.angle = minBackAngle;
+      if (leg.vel < 0) leg.vel *= -0.18;
+    }
+  } else if (leg.phase === "return") {
+    // Settle back toward the neutral middle slowly
+    const acc = -leg.gravity * Math.sin(leg.angle);
+    leg.vel += acc * 0.75;
+    leg.vel *= 0.985;
+    leg.angle += leg.vel;
+
+    if (Math.abs(leg.angle) < 0.03 && Math.abs(leg.vel) < 0.02) {
+      leg.angle = 0.0;
+      leg.vel = 0;
+      leg.phase = "idle";
+      leg.extraDrive = 0;
+      leg.running = false;
+    }
+  }
+
+  if (leg.hitCooldown > 0) leg.hitCooldown--;
+}
+
+function handleCollision(){
+  if (leg.hitCooldown > 0) return;
+
+  const pose = getPose();
+
+  const shoeCenter = {
+    x: pose.ankle.x + Math.cos(pose.footAngle) * (leg.footLen * 0.58),
+    y: pose.ankle.y + Math.sin(pose.footAngle) * (leg.footLen * 0.58)
+  };
+
+  const dx = rock.x - shoeCenter.x;
+  const dy = rock.y - shoeCenter.y;
+  const dist = Math.hypot(dx, dy);
+  const hitRadius = rock.r + 26;
+
+  if (dist < hitRadius) {
+    const nx = dx / (dist || 1);
+    const ny = dy / (dist || 1);
+
+    const footVx = -leg.vel * (shoeCenter.y - leg.hipY);
+    const footVy =  leg.vel * (shoeCenter.x - leg.hipX);
+
+    // Launch the rock along the shoe's facing direction, but clamp to a rightward kick.
+    const shoeDirX = Math.cos(pose.footAngle);
+    const shoeDirY = Math.sin(pose.footAngle);
+    const kickSpeed = Math.max(2.8, Math.hypot(footVx, footVy) * 1.18);
+
+    rock.vx = Math.max(2.8, shoeDirX * kickSpeed);
+    rock.vy = shoeDirY * kickSpeed * 0.72;
+    rock.rot += leg.vel * 0.45;
+
+    spawnDirt(shoeCenter.x, shoeCenter.y + 14, 14, rock.vx);
+
+    leg.vel *= 0.93;
+    leg.hitCooldown = 6;
+  }
+}
+
+
+function spawnDirt(x, y, amount, pushX){
+  for(let i = 0; i < amount; i++){
+    dirtParticles.push({
+      x: x + (Math.random() * 12 - 6),
+      y: y + (Math.random() * 6 - 3),
+      vx: (Math.random() * 1.8 - 0.9) + pushX * 0.12,
+      vy: -(Math.random() * 2.4 + 0.6),
+      life: 1,
+      size: Math.random() * 4 + 2
+    });
+  }
+}
+
+function updateDirt(){
+  for(let i = dirtParticles.length - 1; i >= 0; i--){
+    const p = dirtParticles[i];
+    p.vy += 0.14;
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vx *= 0.98;
+    p.life *= 0.96;
+
+    if(p.y > groundY + 18){
+      p.y = groundY + 18;
+      p.vy *= -0.15;
+      p.vx *= 0.8;
+    }
+
+    if(p.life < 0.05){
+      dirtParticles.splice(i, 1);
+    }
+  }
+}
+
+function updateRock(){
+  rock.vy += 0.3;
+  rock.x += rock.vx;
+  rock.y += rock.vy;
+  rock.rot += rock.vx * 0.01;
+
+  if (rock.y > groundY){
+    rock.y = groundY;
+    if (Math.abs(rock.vy) > 0.35) {
+      spawnDirt(rock.x, rock.y + 14, 8, rock.vx);
+    }
+    rock.vy *= -0.3;
+    rock.vx *= 0.95;
+    if (Math.abs(rock.vy) < 0.2) rock.vy = 0;
+  }
+
+  const leftWall = 22 + rock.r;
+  const rightWall = c.width - 22 - rock.r;
+  if (rock.x < leftWall){
+    rock.x = leftWall;
+    rock.vx *= -0.72;
+    rock.rot *= -0.6;
+  } else if (rock.x > rightWall){
+    rock.x = rightWall;
+    rock.vx *= -0.72;
+    rock.rot *= -0.6;
+  }
+
+  rock.trail.push({x:rock.x, y:rock.y, a:1});
+  if (rock.trail.length > 10) rock.trail.shift();
+  for (const p of rock.trail) p.a *= 0.88;
+}
+
+function capsule(ax, ay, bx, by, ra, rb, c1, c2){
+  const angle = Math.atan2(by-ay, bx-ax);
+  const nx = Math.sin(angle);
+  const ny = -Math.cos(angle);
+
+  const grad = ctx.createLinearGradient(ax - nx*ra, ay - ny*ra, ax + nx*ra, ay + ny*ra);
+  grad.addColorStop(0, c2);
+  grad.addColorStop(0.5, c1);
+  grad.addColorStop(1, c2);
+  ctx.fillStyle = grad;
+
+  ctx.beginPath();
+  ctx.moveTo(ax + nx*ra, ay + ny*ra);
+  ctx.lineTo(bx + nx*rb, by + ny*rb);
+  ctx.arc(bx, by, rb, angle - Math.PI/2, angle + Math.PI/2);
+  ctx.lineTo(ax - nx*ra, ay - ny*ra);
+  ctx.arc(ax, ay, ra, angle + Math.PI/2, angle - Math.PI/2);
+  ctx.closePath();
+  ctx.fill();
+}
+
+function drawJoint(x, y, r){
+  const g = ctx.createRadialGradient(x-r*0.35, y-r*0.35, 2, x, y, r+4);
+  g.addColorStop(0, "#f0c7a6");
+  g.addColorStop(1, "#cb8f68");
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI*2);
+  ctx.fill();
+}
+
+function drawShoe(x, y, angle){
+  ctx.save();
+  ctx.translate(x - 10, y);
+  ctx.rotate(angle);
+
+  const sole = ctx.createLinearGradient(0, 0, 46, 10);
+  sole.addColorStop(0, "#f0f0f0");
+  sole.addColorStop(1, "#d8d8d8");
+  ctx.fillStyle = sole;
+  ctx.beginPath();
+  ctx.moveTo(-2, 11);
+  ctx.lineTo(36, 11);
+  ctx.quadraticCurveTo(48, 11, 50, 4);
+  ctx.lineTo(50, 1);
+  ctx.quadraticCurveTo(45, 7, 32, 9);
+  ctx.lineTo(0, 9);
+  ctx.quadraticCurveTo(-2, 9, -2, 11);
+  ctx.fill();
+
+  const upper = ctx.createLinearGradient(-6, -10, 44, 8);
+  upper.addColorStop(0, "#323844");
+  upper.addColorStop(1, "#0f1218");
+  ctx.fillStyle = upper;
+  ctx.beginPath();
+  ctx.moveTo(-5, -5);
+  ctx.quadraticCurveTo(3, -13, 16, -13);
+  ctx.lineTo(30, -12);
+  ctx.quadraticCurveTo(41, -10, 48, -3);
+  ctx.quadraticCurveTo(53, 2, 50, 7);
+  ctx.quadraticCurveTo(42, 9, 30, 9);
+  ctx.lineTo(4, 8);
+  ctx.quadraticCurveTo(-3, 7, -5, 1);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.strokeStyle = "rgba(255,255,255,0.35)";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(11, -6);
+  ctx.lineTo(19, -4);
+  ctx.lineTo(27, -2);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+function drawRock(){
+  for (const p of rock.trail){
+    ctx.save();
+    ctx.globalAlpha = p.a * 0.12;
+    ctx.fillStyle = "#808080";
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, rock.r * 0.85, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  ctx.save();
+  ctx.globalAlpha = 0.15;
+  ctx.fillStyle = "#000";
+  ctx.beginPath();
+  ctx.ellipse(rock.x + 5, groundY + 19, rock.r * 1.25, rock.r * 0.4, 0, 0, Math.PI*2);
+  ctx.fill();
+  ctx.restore();
+
+  ctx.save();
+  ctx.translate(rock.x, rock.y);
+  ctx.rotate(rock.rot);
+
+  const g = ctx.createRadialGradient(-5,-5,3,0,0,rock.r+6);
+  g.addColorStop(0, "#989898");
+  g.addColorStop(0.55, "#6b6b6b");
+  g.addColorStop(1, "#474747");
+  ctx.fillStyle = g;
+
+  ctx.beginPath();
+  for(let i = 0; i < rock.shape.length; i++){
+    const a = (i / rock.shape.length) * Math.PI * 2;
+    const rr = rock.r * rock.shape[i];
+    const px = Math.cos(a) * rr;
+    const py = Math.sin(a) * rr;
+    if(i === 0) ctx.moveTo(px, py);
+    else ctx.quadraticCurveTo(px*0.8, py*0.8, px, py);
+  }
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.strokeStyle = "rgba(40,40,40,0.35)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(-8, -3);
+  ctx.quadraticCurveTo(0, -8, 9, -2);
+  ctx.moveTo(-5, 6);
+  ctx.quadraticCurveTo(3, 10, 10, 4);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+function drawDirt(){
+  for(const p of dirtParticles){
+    ctx.save();
+    ctx.globalAlpha = p.life * 0.55;
+    ctx.fillStyle = "#8d6e4f";
+    ctx.beginPath();
+    ctx.ellipse(p.x, p.y, p.size, p.size * 0.7, 0, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+function drawBackground(){
+  ctx.fillStyle = "rgba(92,136,88,0.18)";
+  ctx.beginPath();
+  ctx.moveTo(0, 345);
+  ctx.quadraticCurveTo(180, 285, 360, 332);
+  ctx.quadraticCurveTo(540, 290, 740, 334);
+  ctx.quadraticCurveTo(890, 310, 980, 340);
+  ctx.lineTo(980, 560);
+  ctx.lineTo(0, 560);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.fillStyle = "#9f8668";
+  ctx.fillRect(0, 442, c.width, 25);
+  ctx.fillStyle = "#9eb56e";
+  ctx.fillRect(0, 467, c.width, 93);
+}
+
+function drawLeg(){
+  const pose = getPose();
+
+  ctx.fillStyle = "#2a2f37";
+  ctx.beginPath();
+  ctx.arc(leg.hipX, leg.hipY, 14, 0, Math.PI*2);
+  ctx.fill();
+
+  capsule(
+    pose.hip.x, pose.hip.y,
+    pose.knee.x, pose.knee.y,
+    leg.thighRadius, leg.thighRadius - 3,
+    "#f1c7a4", "#cf926c"
+  );
+
+  drawJoint(pose.knee.x, pose.knee.y, 13);
+
+  capsule(
+    pose.knee.x, pose.knee.y,
+    pose.ankle.x, pose.ankle.y,
+    leg.calfRadius, leg.calfRadius - 5,
+    "#efc39d", "#cb8d67"
+  );
+
+  drawJoint(pose.ankle.x, pose.ankle.y, 9);
+  drawShoe(pose.ankle.x, pose.ankle.y, pose.footAngle);
+
+  ctx.save();
+  ctx.globalAlpha = 0.12;
+  ctx.strokeStyle = "#fff";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(pose.hip.x - 4, pose.hip.y - 6);
+  ctx.quadraticCurveTo(pose.knee.x + 10, pose.knee.y - 10, pose.ankle.x + 6, pose.ankle.y - 6);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function loop(){
+  ctx.clearRect(0, 0, c.width, c.height);
+
+  drawBackground();
+  updateLeg();
+  handleCollision();
+  updateRock();
+  updateDirt();
+
+  drawDirt();
+  drawLeg();
+  drawRock();
+
+  requestAnimationFrame(loop);
+}
+
+loop();
+</script>
+</body>
+</html>
