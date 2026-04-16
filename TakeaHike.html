@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>TakeAHike</title>
+<style>
+  :root{
+    --bg:#eef5fb;--sky1:#d9ecff;--sky2:#eef6fc;--hill1:#b8c98d;
+    --blue1:#2563eb;--blue2:#1d4ed8;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;height:100vh;overflow:hidden;display:flex;align-items:center;
+    justify-content:center;background:var(--bg);font-family:Arial,Helvetica,sans-serif;}
+  .wrap{position:relative;}
+  canvas{display:block;
+    background:linear-gradient(180deg,var(--sky1) 0%,var(--sky2) 58%,#cfddb1 58%,var(--hill1) 100%);
+    border-radius:12px;border:4px solid #2f3b46;box-shadow:0 10px 30px rgba(0,0,0,.2);}
+  .ui-top{position:absolute;top:16px;left:50%;transform:translateX(-50%);z-index:5;}
+  button{padding:12px 22px;min-width:120px;height:46px;border:none;border-radius:10px;
+    background:linear-gradient(180deg,var(--blue1),var(--blue2));color:#fff;font-weight:bold;
+    cursor:pointer;box-shadow:0 8px 18px rgba(0,0,0,.16);}
+  .game-menu{position:absolute;top:16px;left:16px;z-index:10;user-select:none;}
+  .game-menu-trigger{display:inline-flex;align-items:center;justify-content:center;
+    padding:12px 22px;min-width:120px;height:46px;color:#000;font-weight:bold;}
+  .game-menu-dropdown{position:absolute;top:42px;left:0;display:none;min-width:150px;
+    padding:6px;border-radius:10px;background:rgba(255,255,255,.96);
+    box-shadow:0 10px 24px rgba(0,0,0,.18);border:1px solid rgba(0,0,0,.08);}
+  .game-menu:hover .game-menu-dropdown{display:block;}
+  .game-menu-item{display:block;width:100%;padding:10px 12px;border-radius:8px;
+    color:#1f2937;text-decoration:none;font-weight:bold;cursor:pointer;}
+  .game-menu-item:hover{background:#eef5fb;}
+  .hint{position:absolute;left:16px;bottom:10px;font-size:13px;font-weight:bold;
+    color:#0f172a;opacity:.75;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="game-menu">
+    <div class="game-menu-trigger">change game</div>
+    <div class="game-menu-dropdown">
+      <a class="game-menu-item" href="KickRocksTheGame.html">kick rocks</a>
+      <a class="game-menu-item" href="PoundSand.html">pound sand</a>
+      <a class="game-menu-item" href="TakeAHike.html">take a hike</a>
+    </div>
+  </div>
+  <div class="ui-top"><button id="startBtn">Start / Reset</button></div>
+  <canvas id="game" width="980" height="560"></canvas>
+  <div class="hint">Press Space or tap to jump over the trees.</div>
+</div>
+<script>
+const canvas = document.getElementById("game");
+const ctx    = canvas.getContext("2d");
+const startBtn = document.getElementById("startBtn");
+
+// All values are per-millisecond — frame-rate independent
+const GRAVITY     = 0.00486;   // px/ms^2
+const JUMP_POWER  = -1.32;     // px/ms
+const BASE_SPEED  = 0.000420;  // laneT/ms
+const SPAWN_DELAY = 2000;      // ms before first tree
+const SPAWN_MIN   = 1400;
+const SPAWN_RANGE = 800;
+
+const LANE = {
+  startX: 920, startY: 148,
+  endX:   230, endY:   438,
+  playerT: 0.96
+};
+
+function lanePoint(t){
+  return {
+    x: LANE.startX + (LANE.endX - LANE.startX) * t,
+    y: LANE.startY + (LANE.endY - LANE.startY) * t
+  };
+}
+
+const playerX  = lanePoint(LANE.playerT).x;
+const GROUND_Y = 505;  // manually placed inside the brown trail band
+
+const state = {
+  running: false,
+  lastTs:  null,
+  elapsed: 0,
+  speed:   BASE_SPEED,
+  spawnAt: SPAWN_DELAY,
+  player:  null,
+  trees:   []
+};
+
+function resetGame(){
+  state.running = true;
+  state.elapsed = 0;
+  state.speed   = BASE_SPEED;
+  state.spawnAt = SPAWN_DELAY;
+  state.trees   = [];
+  state.lastTs  = null;
+  state.player  = {
+    x:        playerX,
+    groundY:  GROUND_Y,
+    y:        GROUND_Y,
+    vy:       0,
+    onGround: true,
+    stride:   0
+  };
+}
+resetGame();
+state.running = false;
+
+startBtn.addEventListener("click", resetGame);
+canvas.addEventListener("click", jump);
+window.addEventListener("keydown", e => {
+  if (e.code === "Space"){ e.preventDefault(); jump(); }
+});
+
+function jump(){
+  if (!state.running){ state.running = true; return; }
+  const p = state.player;
+  if (!p.onGround) return;
+  p.vy = JUMP_POWER;
+  p.onGround = false;
+}
+
+function spawnTree(){
+  const pt = lanePoint(0.01);
+  state.trees.push({ laneT: 0.01, x: pt.x, y: pt.y, w:0, h:0, trunkW:0, trunkH:0 });
+}
+
+function treeScale(t){ return 0.30 + t * 1.10; }
+
+function update(dt){
+  if (!state.running) return;
+  state.elapsed += dt;
+
+  const p = state.player;
+  if (!p.onGround){
+    p.vy += GRAVITY * dt;
+    p.y  += p.vy * dt;
+    if (p.y >= p.groundY){
+      p.y = p.groundY; p.vy = 0; p.onGround = true;
+    }
+  }
+  if (p.onGround) p.stride += 0.007 * dt;
+
+  state.spawnAt -= dt;
+  if (state.spawnAt <= 0){
+    spawnTree();
+    state.spawnAt = SPAWN_MIN + Math.random() * SPAWN_RANGE;
+  }
+
+  for (const tr of state.trees){
+    tr.laneT += state.speed * dt;
+    const pt = lanePoint(tr.laneT);
+    tr.x = pt.x; tr.y = pt.y;
+    const sc = treeScale(tr.laneT);
+    tr.w = 44*sc; tr.h = 92*sc; tr.trunkW = 12*sc; tr.trunkH = 26*sc;
+  }
+  state.trees = state.trees.filter(tr => tr.laneT < 1.05);
+  state.speed = Math.min(BASE_SPEED + state.elapsed * 0.000000012, BASE_SPEED * 1.5);
+
+  // collision — circle vs foliage circle
+  const pcx = p.x + 4, pcy = p.y - 46, pr = 17;
+  for (const tr of state.trees){
+    if (Math.abs(tr.laneT - LANE.playerT) > 0.10) continue;
+    const cx = tr.x + tr.w*0.50, cy = tr.y + tr.h*0.42, cr = tr.w*0.44;
+    const dx = pcx-cx, dy = pcy-cy;
+    if (dx*dx + dy*dy < (pr+cr)*(pr+cr)){ resetGame(); return; }
+  }
+}
+
+function drawBackground(){
+  ctx.fillStyle = "rgba(90,136,85,0.20)";
+  ctx.beginPath();
+  ctx.moveTo(0,335); ctx.quadraticCurveTo(150,240,330,320);
+  ctx.quadraticCurveTo(530,220,700,300); ctx.quadraticCurveTo(850,235,980,300);
+  ctx.lineTo(980,560); ctx.lineTo(0,560); ctx.closePath(); ctx.fill();
+
+  ctx.fillStyle = "#93ab67";
+  ctx.beginPath();
+  ctx.moveTo(0,560); ctx.lineTo(0,500);
+  ctx.quadraticCurveTo(180,470,280,420); ctx.quadraticCurveTo(400,350,520,315);
+  ctx.quadraticCurveTo(700,250,980,110); ctx.lineTo(980,560); ctx.closePath(); ctx.fill();
+
+  const grad = ctx.createLinearGradient(210,500,900,170);
+  grad.addColorStop(0,"#b89b74"); grad.addColorStop(1,"#9d815f");
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.moveTo(175,560); ctx.lineTo(300,560); ctx.lineTo(935,184); ctx.lineTo(860,162);
+  ctx.closePath(); ctx.fill();
+
+  ctx.fillStyle = "rgba(255,255,255,0.12)";
+  ctx.beginPath();
+  ctx.moveTo(210,560); ctx.lineTo(250,560); ctx.lineTo(905,180); ctx.lineTo(885,172);
+  ctx.closePath(); ctx.fill();
+}
+
+function drawTree(tr){
+  ctx.save(); ctx.globalAlpha=0.13; ctx.fillStyle="#000";
+  ctx.beginPath();
+  ctx.ellipse(tr.x+tr.w*0.5, tr.y+tr.h+5, tr.w*0.40, 7, 0, 0, Math.PI*2);
+  ctx.fill(); ctx.restore();
+
+  ctx.fillStyle="#6d4d31";
+  ctx.beginPath();
+  ctx.roundRect(tr.x+tr.w*0.38, tr.y+tr.h-tr.trunkH, tr.trunkW, tr.trunkH, 5);
+  ctx.fill();
+
+  const cx=tr.x+tr.w*0.5, top=tr.y+6;
+  ctx.fillStyle="#2d6b34";
+  ctx.beginPath();
+  ctx.arc(cx,           top+tr.w*0.20, tr.w*0.23, 0, Math.PI*2);
+  ctx.arc(cx-tr.w*0.19, top+tr.w*0.43, tr.w*0.22, 0, Math.PI*2);
+  ctx.arc(cx+tr.w*0.19, top+tr.w*0.43, tr.w*0.22, 0, Math.PI*2);
+  ctx.arc(cx,           top+tr.w*0.68, tr.w*0.28, 0, Math.PI*2);
+  ctx.fill();
+  ctx.fillStyle="#3e8746";
+  ctx.beginPath();
+  ctx.arc(cx-tr.w*0.07, top+tr.w*0.28, tr.w*0.10, 0, Math.PI*2);
+  ctx.arc(cx+tr.w*0.11, top+tr.w*0.41, tr.w*0.09, 0, Math.PI*2);
+  ctx.fill();
+}
+
+function drawPlayer(){
+  const p=state.player, airborne=!p.onGround;
+  const bob      = airborne ? 0 : Math.sin(p.stride)*2.2;
+  const legSwing = airborne ? 0 : Math.sin(p.stride)*12;
+  const armSwing = airborne ? -8 : Math.sin(p.stride)*16;
+
+  ctx.save();
+  ctx.translate(p.x, p.y+bob);
+
+  const ss = airborne ? Math.max(0.3, 1-Math.abs(p.y-p.groundY)/120) : 1;
+  ctx.save(); ctx.globalAlpha=0.13*ss; ctx.fillStyle="#000";
+  ctx.beginPath(); ctx.ellipse(3,12,22*ss,6,0,0,Math.PI*2); ctx.fill(); ctx.restore();
+
+  ctx.fillStyle="#6b3f28";
+  ctx.beginPath(); ctx.roundRect(-11,-58,26,34,8); ctx.fill();
+
+  const shirt=ctx.createLinearGradient(0,-56,0,-4);
+  shirt.addColorStop(0,"#3b82f6"); shirt.addColorStop(1,"#1d4ed8");
+  ctx.fillStyle=shirt;
+  ctx.beginPath(); ctx.roundRect(-13,-54,30,48,10); ctx.fill();
+
+  const skin=ctx.createRadialGradient(0,-76,4,0,-74,16);
+  skin.addColorStop(0,"#f0c7a6"); skin.addColorStop(1,"#cf936b");
+  ctx.fillStyle=skin;
+  ctx.beginPath(); ctx.arc(2,-74,14,0,Math.PI*2); ctx.fill();
+
+  ctx.fillStyle="#2f3b46";
+  ctx.beginPath(); ctx.ellipse(2,-82,16,8,0,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.roundRect(-11,-87,24,8,6); ctx.fill();
+
+  ctx.strokeStyle="#efc39d"; ctx.lineWidth=8; ctx.lineCap="round";
+  ctx.beginPath(); ctx.moveTo(12,-42); ctx.lineTo(28,-20+armSwing*0.18); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(-8,-42); ctx.lineTo(-22,-18-armSwing*0.18); ctx.stroke();
+
+  ctx.strokeStyle="#8a8a8a"; ctx.lineWidth=3;
+  ctx.beginPath(); ctx.moveTo(24,-18+armSwing*0.18); ctx.lineTo(38,14); ctx.stroke();
+
+  ctx.strokeStyle="#2f3744"; ctx.lineWidth=11;
+  ctx.beginPath(); ctx.moveTo(-2,-6); ctx.lineTo(-9,32+legSwing*0.28); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(10,-6); ctx.lineTo(17,32-legSwing*0.28); ctx.stroke();
+
+  ctx.fillStyle="#1b1f27";
+  ctx.beginPath(); ctx.roundRect(-17,28+legSwing*0.28,16,10,4); ctx.fill();
+  ctx.beginPath(); ctx.roundRect(11, 28-legSwing*0.28,16,10,4); ctx.fill();
+
+  ctx.restore();
+}
+
+function drawStartScreen(){
+  ctx.save();
+  ctx.fillStyle="rgba(0,0,0,0.38)";
+  ctx.beginPath(); ctx.roundRect(canvas.width/2-200,canvas.height/2-50,400,100,14); ctx.fill();
+  ctx.fillStyle="#fff"; ctx.font="bold 26px Arial"; ctx.textAlign="center";
+  ctx.fillText("Press Space or Tap to Start", canvas.width/2, canvas.height/2+9);
+  ctx.restore();
+}
+
+function loop(ts){
+  if (state.lastTs === null) state.lastTs = ts;
+  const dt = Math.min(ts - state.lastTs, 100);
+  state.lastTs = ts;
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  drawBackground();
+  update(dt);
+  const ordered = [...state.trees].sort((a,b)=>a.laneT-b.laneT);
+  for (const tr of ordered) drawTree(tr);
+  drawPlayer();
+  if (!state.running) drawStartScreen();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
